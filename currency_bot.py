@@ -1,58 +1,93 @@
-import telebot
-
 import settings
+import exchange
+import telebot
+import pytz
+from keyboa import Keyboa
+
+P_TIMEZONE = pytz.timezone(settings.TIMEZONE)
+TIMEZONE_COMMON_NAME = settings.TIMEZONE_COMMON_NAME
+
+bot = telebot.TeleBot(settings.TOKEN)
 
 
-class TrainAssistantBot:
-
-    def __init__(self):
-        self.token = settings.TOKEN
-        self.bot = telebot.TeleBot(self.token)
-        self.handler = Handler(self.bot)
-        # self.cache_data = None
-        # self.cache_currency = None
-        # self.database = DBManager(user=settings.DB_USER,
-        #                           password=settings.DB_PASSWORD,
-        #                           database_name=settings.DB_NAME)
-        # self.googlesheets = GoogleSheets(credentials=settings.CREDENTIALS_FILE,
-        #                                  spreedsheet_id=settings.SPREADSHEET_ID)
-        # self.exchangeman = ExchangeManager(api=settings.BANK_API,
-        #                                    valute='USD')
+@bot.message_handler(commands=['start'])
+def start_command(message):
+    telebot.types.ReplyKeyboardRemove()
+    reply_keyboard = telebot.types.ReplyKeyboardMarkup(True)
+    reply_keyboard.row('Курс валют к рублю', 'Помощь')
+    bot.send_message(
+        message.chat.id,
+        'Привет! Я могу показывать курсы валют!\n' +
+        'Список валют - нажми /exchange.\n' +
+        'Чтобы запросить помощь - нажми /help.', reply_markup=reply_keyboard
+    )
 
 
-    # def get_data_from_api(self):
-    #     return self.googlesheets.unload(), self.exchangeman.load_exchange()
-    #
-    # def run(self):
-    #     self.cache_data = self.database.get_data()  # формируем первоначальный кэш данных из нашей БД
-    #     self.cache_currency = self.exchangeman.load_exchange()  # получаем первоначальный кэш данных курса USD
-    #     # Далее запускаем цикл сравнения нашего кэша данных с данным из таблицы google
-    #     # и кэша валют с текущим курсом
-    #     while True:
-    #         current_currency = self.exchangeman.load_exchange()  # получаем текущий курс валюты
-    #         values_from_sheets = self.googlesheets.unload()  # выгружаем данные из таблицы google
-    #         # Если текущий курс не совпадает с кэшем или данные из таблицы не совпадают с кэшем
-    #         if self.cache_currency != current_currency or self.cache_data != values_from_sheets:
-    #             # то записываем новые данные с учетом изменений в БД
-    #             self.database.recording(values_from_sheets, current_currency)
-    #             # и обновляем кэш
-    #             self.cache_data = values_from_sheets
-    #             self.cache_currency = current_currency
-    #             print('Изменение')
-    #         else:
-    #             print('без изменений')
-    #         time.sleep(settings.TIMING)
+@bot.message_handler(commands=['help'])
+def help_command(message):
+    keyboard = telebot.types.InlineKeyboardMarkup()
+    keyboard.add(
+        telebot.types.InlineKeyboardButton(
+            'Message the developer', url='telegram.me/balashovia'
+        )
+    )
+    bot.send_message(
+        message.chat.id,
+        '1) Чтобы увидеть список доступных валют, нажмите /exchange.\n' +
+        '2) Нажмите на интересующую Вас валюту.\n' +
+        '3) Вы получите информацию по продаже и покупке выбранной валюты по курсу ЦБ.\n' +
+        '4) Нажмите “Update”, чтобы обновить текущую информацию по курсу.\n' +
+        '5) Поддержка Бота всегда на связи. Напишите telegram.me/balashovia по любым вопросам и предложениям',
+        reply_markup=keyboard
+    )
 
 
-    def run(self):
-        self.handler.handle()
-        self.bot.polling(none_stop=True)
+@bot.message_handler(commands=['exchange'])
+def exchange_command(message):
+    keyboard = Keyboa(items=sorted(list(exchange.load_exchange().keys())), copy_text_to_callback=True,
+                            items_in_row=5)
+    bot.send_message(message.chat.id, 'Выберите валюту:', reply_markup=keyboard())
 
 
+@bot.callback_query_handler(func=lambda c :True)
+def inline(c):
+    bot.send_message(
+        c.message.chat.id,
+        'По текущему курсу ЦБ РФ: \n\n' +
+        f'{exchange.get_exchange(c.data)["Nominal"]} {exchange.get_exchange(c.data)["Name"]} = ' +
+        f'{exchange.get_exchange(c.data)["Value"]} руб. \n\n' +
+        'Предыдущий курс: \n\n' +
+        f'{exchange.get_exchange(c.data)["Nominal"]} {exchange.get_exchange(c.data)["Name"]} = ' +
+        f'{exchange.get_exchange(c.data)["Previous"]} руб. \n\n')
 
-if __name__ == '__main__':
-    bot = TrainAssistantBot()
-    bot.run()
+
+@bot.message_handler(content_types=['text'])
+def handle_text(message):
+    if message.text == 'Курс валют к рублю':
+        keyboard = Keyboa(items=sorted(list(exchange.load_exchange().keys())), copy_text_to_callback=True,
+                                items_in_row=5)
+        bot.send_message(message.chat.id, 'Выберите валюту:', reply_markup=keyboard())
+    if message.text == 'Помощь':
+        keyboard = telebot.types.InlineKeyboardMarkup()
+        keyboard.add(
+            telebot.types.InlineKeyboardButton(
+                'Message the developer', url='telegram.me/balashovia'
+            )
+        )
+        bot.send_message(
+            message.chat.id,
+            '1) Чтобы увидеть список доступных валют, нажмите /exchange.\n' +
+            '2) Нажмите на интересующую Вас валюту.\n' +
+            '3) Вы получите информацию по продаже и покупке выбранной валюты по курсу ЦБ.\n' +
+            '4) Нажмите “Update”, чтобы обновить текущую информацию по курсу.\n' +
+            '5) Поддержка Бота всегда на связи. Напишите telegram.me/balashovia по любым вопросам и предложениям',
+            reply_markup=keyboard
+        )
+
+
+if __name__ == "__main__":
+    bot.infinity_polling()
+
 
 
 
